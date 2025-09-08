@@ -195,17 +195,59 @@ def main():
         
         # AWS 자격 증명 상태 확인
         st.subheader("🔐 AWS Credentials")
-        try:
-            sts = boto3.client('sts', region_name=selected_region)
-            identity = sts.get_caller_identity()
-            st.success(f"✅ Connected as: {identity['Arn'].split('/')[-1]}")
-        except Exception as e:
+        
+        # Streamlit Cloud에서 secrets 사용
+        aws_access_key = st.secrets.get("AWS_ACCESS_KEY_ID", os.environ.get("AWS_ACCESS_KEY_ID"))
+        aws_secret_key = st.secrets.get("AWS_SECRET_ACCESS_KEY", os.environ.get("AWS_SECRET_ACCESS_KEY"))
+        
+        if aws_access_key and aws_secret_key:
+            try:
+                sts = boto3.client(
+                    'sts', 
+                    region_name=selected_region,
+                    aws_access_key_id=aws_access_key,
+                    aws_secret_access_key=aws_secret_key
+                )
+                identity = sts.get_caller_identity()
+                st.success(f"✅ Connected as: {identity['Arn'].split('/')[-1]}")
+            except Exception as e:
+                st.error(f"❌ AWS credentials error: {str(e)}")
+                return
+        else:
             st.error("❌ AWS credentials not configured")
+            st.info("Configure AWS credentials in Streamlit secrets or environment variables")
             return
     
     # AthenaTableCreator 인스턴스 생성
     try:
-        creator = AthenaTableCreator(region_name=selected_region)
+        # AWS 자격 증명 가져오기
+        aws_access_key = st.secrets.get("AWS_ACCESS_KEY_ID", os.environ.get("AWS_ACCESS_KEY_ID"))
+        aws_secret_key = st.secrets.get("AWS_SECRET_ACCESS_KEY", os.environ.get("AWS_SECRET_ACCESS_KEY"))
+        
+        if aws_access_key and aws_secret_key:
+            # 자격 증명이 있는 경우 명시적으로 전달
+            creator = AthenaTableCreator(region_name=selected_region)
+            # AWS 클라이언트 재생성 (자격 증명 포함)
+            creator.s3_client = boto3.client(
+                's3', 
+                region_name=selected_region,
+                aws_access_key_id=aws_access_key,
+                aws_secret_access_key=aws_secret_key
+            )
+            creator.athena_client = boto3.client(
+                'athena', 
+                region_name=selected_region,
+                aws_access_key_id=aws_access_key,
+                aws_secret_access_key=aws_secret_key
+            )
+            creator.glue_client = boto3.client(
+                'glue', 
+                region_name=selected_region,
+                aws_access_key_id=aws_access_key,
+                aws_secret_access_key=aws_secret_key
+            )
+        else:
+            creator = AthenaTableCreator(region_name=selected_region)
     except Exception as e:
         st.error(f"Failed to initialize AWS clients: {str(e)}")
         return
