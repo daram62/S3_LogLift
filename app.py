@@ -167,6 +167,30 @@ def main():
     st.title("🚀 S3 Log Analyzer - Auto Setup")
     st.markdown("S3 Access Log를 위한 Athena 테이블을 자동으로 생성합니다")
     
+    # 사용자 안내 정보
+    with st.expander("ℹ️ How to get AWS Credentials", expanded=False):
+        st.markdown("""
+        ### AWS 자격 증명을 얻는 방법:
+        
+        1. **AWS Console 로그인** → IAM 서비스로 이동
+        2. **Users** → 본인 사용자 선택 (또는 새 사용자 생성)
+        3. **Security credentials** 탭 → **Create access key**
+        4. **Use case**: Command Line Interface (CLI) 선택
+        5. **Access Key ID**와 **Secret Access Key** 복사
+        
+        ### 필요한 권한:
+        - `AmazonS3ReadOnlyAccess` (S3 버킷 목록 조회용)
+        - `AmazonAthenaFullAccess` (Athena 테이블 생성용)
+        - `AWSGlueConsoleFullAccess` (Glue 카탈로그 접근용)
+        
+        ### 보안 주의사항:
+        - 자격 증명은 이 세션에서만 사용되며 저장되지 않습니다
+        - 사용 후 브라우저를 닫으면 자동으로 삭제됩니다
+        - 가능하면 임시 자격 증명이나 제한된 권한을 사용하세요
+        """)
+    
+    st.markdown("---")
+    
     # Sidebar 설정
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -193,13 +217,49 @@ def main():
             help="Athena 쿼리 결과를 저장할 S3 위치"
         )
         
-        # AWS 자격 증명 상태 확인
+        # AWS 자격 증명 입력
         st.subheader("🔐 AWS Credentials")
         
-        # Streamlit Cloud에서 secrets 사용
-        aws_access_key = st.secrets.get("AWS_ACCESS_KEY_ID", os.environ.get("AWS_ACCESS_KEY_ID"))
-        aws_secret_key = st.secrets.get("AWS_SECRET_ACCESS_KEY", os.environ.get("AWS_SECRET_ACCESS_KEY"))
+        # 자격 증명 입력 방법 선택
+        auth_method = st.radio(
+            "Authentication Method",
+            ["Enter Credentials", "Use Environment/Secrets"],
+            help="Choose how to provide AWS credentials"
+        )
         
+        aws_access_key = None
+        aws_secret_key = None
+        
+        if auth_method == "Enter Credentials":
+            st.info("💡 Your credentials are only used for this session and are not stored")
+            aws_access_key = st.text_input(
+                "AWS Access Key ID",
+                type="password",
+                help="Your AWS Access Key ID"
+            )
+            aws_secret_key = st.text_input(
+                "AWS Secret Access Key", 
+                type="password",
+                help="Your AWS Secret Access Key"
+            )
+            
+            if aws_access_key and aws_secret_key:
+                st.success("✅ Credentials entered")
+            elif aws_access_key or aws_secret_key:
+                st.warning("⚠️ Please enter both Access Key ID and Secret Access Key")
+        
+        else:  # Use Environment/Secrets
+            # Streamlit Cloud에서 secrets 또는 환경변수 사용
+            aws_access_key = st.secrets.get("AWS_ACCESS_KEY_ID", os.environ.get("AWS_ACCESS_KEY_ID"))
+            aws_secret_key = st.secrets.get("AWS_SECRET_ACCESS_KEY", os.environ.get("AWS_SECRET_ACCESS_KEY"))
+            
+            if aws_access_key and aws_secret_key:
+                st.success("✅ Using configured credentials")
+            else:
+                st.error("❌ No credentials found in environment or secrets")
+                st.info("Configure AWS credentials in Streamlit secrets or environment variables")
+        
+        # 자격 증명 검증
         if aws_access_key and aws_secret_key:
             try:
                 sts = boto3.client(
@@ -212,42 +272,34 @@ def main():
                 st.success(f"✅ Connected as: {identity['Arn'].split('/')[-1]}")
             except Exception as e:
                 st.error(f"❌ AWS credentials error: {str(e)}")
+                st.info("Please check your credentials and try again")
                 return
         else:
-            st.error("❌ AWS credentials not configured")
-            st.info("Configure AWS credentials in Streamlit secrets or environment variables")
+            st.error("❌ Please provide AWS credentials to continue")
             return
     
-    # AthenaTableCreator 인스턴스 생성
+    # AthenaTableCreator 인스턴스 생성 (자격 증명은 sidebar에서 이미 검증됨)
     try:
-        # AWS 자격 증명 가져오기
-        aws_access_key = st.secrets.get("AWS_ACCESS_KEY_ID", os.environ.get("AWS_ACCESS_KEY_ID"))
-        aws_secret_key = st.secrets.get("AWS_SECRET_ACCESS_KEY", os.environ.get("AWS_SECRET_ACCESS_KEY"))
-        
-        if aws_access_key and aws_secret_key:
-            # 자격 증명이 있는 경우 명시적으로 전달
-            creator = AthenaTableCreator(region_name=selected_region)
-            # AWS 클라이언트 재생성 (자격 증명 포함)
-            creator.s3_client = boto3.client(
-                's3', 
-                region_name=selected_region,
-                aws_access_key_id=aws_access_key,
-                aws_secret_access_key=aws_secret_key
-            )
-            creator.athena_client = boto3.client(
-                'athena', 
-                region_name=selected_region,
-                aws_access_key_id=aws_access_key,
-                aws_secret_access_key=aws_secret_key
-            )
-            creator.glue_client = boto3.client(
-                'glue', 
-                region_name=selected_region,
-                aws_access_key_id=aws_access_key,
-                aws_secret_access_key=aws_secret_key
-            )
-        else:
-            creator = AthenaTableCreator(region_name=selected_region)
+        creator = AthenaTableCreator(region_name=selected_region)
+        # AWS 클라이언트 재생성 (자격 증명 포함)
+        creator.s3_client = boto3.client(
+            's3', 
+            region_name=selected_region,
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key
+        )
+        creator.athena_client = boto3.client(
+            'athena', 
+            region_name=selected_region,
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key
+        )
+        creator.glue_client = boto3.client(
+            'glue', 
+            region_name=selected_region,
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key
+        )
     except Exception as e:
         st.error(f"Failed to initialize AWS clients: {str(e)}")
         return
